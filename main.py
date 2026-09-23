@@ -1,7 +1,9 @@
 import os
 import re
 import logging
+import threading
 import requests
+from flask import Flask
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -24,9 +26,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ---- Render health check এর জন্য Flask সার্ভার ----
+health_app = Flask(__name__)
+
+
+@health_app.route("/")
+def health():
+    return "Bot is running", 200
+
+
+def run_health_server():
+    port = int(os.getenv("PORT", 10000))
+    health_app.run(host="0.0.0.0", port=port, use_reloader=False)
+
+
+# ---- Telegram bot কোড ----
 
 def normalize_phone(phone: str) -> str:
-    """নম্বর থেকে সব অক্ষর বাদ দিয়ে শুধু ডিজিট রাখে"""
     return re.sub(r"\D", "", phone)
 
 
@@ -39,7 +55,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def check_whatsapp(phone: str) -> bool:
-    """2Chat API দিয়ে চেক করে নম্বরে WhatsApp আছে কিনা"""
     try:
         url = (
             f"https://api.p.2chat.io/open/whatsapp/check-number/"
@@ -88,6 +103,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN সেট করা হয়নি!")
+
+    # Render health check সার্ভার আলাদা থ্রেডে চালু
+    threading.Thread(target=run_health_server, daemon=True).start()
+    logger.info("Health check server started on PORT")
 
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
